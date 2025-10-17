@@ -16,6 +16,8 @@
 #include <sdktools>
 #include <sdkhooks>
 #include <clientprefs>
+#include <adt_array>
+#include <entity_prop_stocks>
 
 #pragma semicolon 1
 
@@ -100,6 +102,10 @@ int g_iProjectileModelIndex = -1;
 int g_iWorldModelIndex = -1;
 int g_iViewModelIndex = -1;
 
+Handle g_hRefreshTimer = INVALID_HANDLE;
+Handle g_hTrackedProjectiles = INVALID_HANDLE;
+Handle g_hTrackedViewmodels = INVALID_HANDLE;
+
 
 bool IsClientActive(int client)
 {
@@ -120,6 +126,23 @@ public void OnPluginStart()
     g_hCookieSkin  = RegClientCookie("flash_skin",  "Flash skin index", CookieAccess_Public);
     g_hCookieColor = RegClientCookie("flash_color", "Flash color RGB",  CookieAccess_Public);
 
+    if (g_hTrackedProjectiles == INVALID_HANDLE)
+    {
+        g_hTrackedProjectiles = CreateArray();
+    }
+
+    if (g_hTrackedViewmodels == INVALID_HANDLE)
+    {
+        g_hTrackedViewmodels = CreateArray();
+    }
+
+    if (g_hRefreshTimer == INVALID_HANDLE)
+    {
+        g_hRefreshTimer = CreateTimer(0.1, Timer_RefreshFlashEntities, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
+    }
+
+    ResetTrackedFlashEntities();
+
     // Подхватить игроков при поздней загрузке плагина
     for (int i = 1; i <= MaxClients; i++)
     {
@@ -138,8 +161,31 @@ public void OnPluginStart()
         }
     }
 }
+
+public void OnPluginEnd()
+{
+    if (g_hRefreshTimer != INVALID_HANDLE)
+    {
+        CloseHandle(g_hRefreshTimer);
+        g_hRefreshTimer = INVALID_HANDLE;
+    }
+
+    if (g_hTrackedProjectiles != INVALID_HANDLE)
+    {
+        CloseHandle(g_hTrackedProjectiles);
+        g_hTrackedProjectiles = INVALID_HANDLE;
+    }
+
+    if (g_hTrackedViewmodels != INVALID_HANDLE)
+    {
+        CloseHandle(g_hTrackedViewmodels);
+        g_hTrackedViewmodels = INVALID_HANDLE;
+    }
+}
 public void OnMapStart()
 {
+    ResetTrackedFlashEntities();
+
     // Добавляем файлы в таблицу закачек
     for (int i = 0; i < sizeof(DOWNLOADS); i++)
     {
@@ -155,6 +201,11 @@ public void OnMapStart()
 
     g_iViewModelIndex = PrecacheFlashModel(MODEL_FLASHBANG_VIEW, "view");
     g_bViewModelReady = (g_iViewModelIndex > 0);
+}
+
+public void OnMapEnd()
+{
+    ResetTrackedFlashEntities();
 }
 
 int PrecacheFlashModel(const char[] path, const char[] tag)
@@ -238,57 +289,6 @@ public void OnClientCookiesCached(int client)
     LoadClientSettings(client);
 }
 
-
- 
-public void OnEntityCreated(int entity, const char[] classname)
-{
-    if (!g_bRoundActive) return;
-    if (classname[0] == '\0') return;
-
-    if (StrEqual(classname, "flashbang_projectile", false))
-    {
-        // Отложим применение на момент после спавна, чтобы владелец уже был назначен
-        SDKHook(entity, SDKHook_SpawnPost, OnFlashbangSpawned);
-    }
-}
-
-public void OnFlashbangSpawned(int entity)
-{
-        if (!IsValidEntSafe(entity))
-    {
-        return;
-    }
-
-    SDKUnhook(entity, SDKHook_SpawnPost, OnFlashbangSpawned);
-
-    int owner = ResolveFlashOwner(entity);
-    if (owner == 0)
-    {
-        RequestFrame(DeferredApplyFlashSettings, EntIndexToEntRef(entity));
-        return;
-    }
-
-    ApplyFlashSettings(entity, owner);
-}
-
-   
-   void DeferredApplyFlashSettings(int ref)
-{
-    int entity = EntRefToEntIndex(ref);
-    if (!IsValidEntSafe(entity))
-    {
-        return;
-    }
-
-    int owner = ResolveFlashOwner(entity);
-    if (owner == 0)
-    {
-        return;
-    }
-
-    ApplyFlashSettings(entity, owner);
-}
-
 void ApplyFlashSettings(int entity, int owner)
 {
     if (!IsClientActive(owner))
@@ -312,6 +312,135 @@ void ApplyFlashSettings(int entity, int owner)
     int g = g_iColor[owner][1];
     int b = g_iColor[owner][2];
     SetEntityRenderColor(entity, r, g, b, 255);
+}
+
+public Action Timer_RefreshFlashEntities(Handle timer)
+{
+    CleanupTrackedArray(g_hTrackedProjectiles);
+    CleanupTrackedArray(g_hTrackedViewmodels);
+
+    if (!g_bRoundActive)
+    {
+        return Plugin_Continue;
+    }
+
+    ProcessFlashProjectiles();
+    ProcessPredictedViewmodels();
+
+    return Plugin_Continue;
+}
+
+void ProcessFlashProjectiles()
+{
+    int entity = -1;
+    while ((entity = FindEntityByClassname(entity, "flashbang_projectile")) != -1)
+    {
+        if (!IsValidEntSafe(entity))
+        {
+            continue;
+        }
+
+        TrackEntityReference(g_hTrackedProjectiles, entity);
+
+        int owner = ResolveFlashOwner(entity);
+        if (owner == 0)
+        {
+            continue;
+        }
+
+        ApplyFlashSettings(entity, owner);
+    }
+}
+
+void ProcessPredictedViewmodels()
+{
+    int entity = -1;
+    while ((entity = FindEntityByClassname(entity, "predicted_viewmodel")) != -1)
+    {
+        if (!IsValidEntSafe(entity))
+        {
+            continue;
+        }
+
+        TrackEntityReference(g_hTrackedViewmodels, entity);
+
+        ApplyPredictedViewmodel(entity);
+    }
+}
+
+void ApplyPredictedViewmodel(int entity)
+{
+    int owner = GetEntPropEnt(entity, Prop_Send, "m_hOwner");
+    if (!IsClientActive(owner))
+    {
+        return;
+    }
+
+    int weapon = GetEntPropEnt(owner, Prop_Send, "m_hActiveWeapon");
+    if (weapon <= MaxClients || !IsValidEdict(weapon))
+    {
+        return;
+    }
+
+    char classname[32];
+    GetEntityClassname(weapon, classname, sizeof(classname));
+    if (!StrEqual(classname, "weapon_flashbang", false))
+    {
+        return;
+    }
+
+    ApplyFlashWeaponViewmodel(owner, weapon);
+}
+
+void CleanupTrackedArray(Handle array)
+{
+    if (array == INVALID_HANDLE)
+    {
+        return;
+    }
+
+    int length = GetArraySize(array);
+    for (int i = length - 1; i >= 0; i--)
+    {
+        int ref = GetArrayCell(array, i);
+        int entity = EntRefToEntIndex(ref);
+        if (entity == INVALID_ENT_REFERENCE || entity <= MaxClients || !IsValidEdict(entity))
+        {
+            RemoveFromArray(array, i);
+        }
+    }
+}
+
+void TrackEntityReference(Handle array, int entity)
+{
+    if (array == INVALID_HANDLE)
+    {
+        return;
+    }
+
+    int ref = EntIndexToEntRef(entity);
+    if (ref == INVALID_ENT_REFERENCE)
+    {
+        return;
+    }
+
+    if (FindValueInArray(array, ref) == -1)
+    {
+        PushArrayCell(array, ref);
+    }
+}
+
+void ResetTrackedFlashEntities()
+{
+    if (g_hTrackedProjectiles != INVALID_HANDLE)
+    {
+        ClearArray(g_hTrackedProjectiles);
+    }
+
+    if (g_hTrackedViewmodels != INVALID_HANDLE)
+    {
+        ClearArray(g_hTrackedViewmodels);
+    }
 }
 
 void ApplyFlashWeaponViewmodel(int client, int weapon)
@@ -369,32 +498,7 @@ void ApplyFlashWeaponViewmodel(int client, int weapon)
         SetEntityRenderColor(worldModel, r, g, b, 255);
     }
 
-    for (int slot = 0; slot < 2; slot++)
-    {
-        int viewmodel = GetEntPropEnt(client, Prop_Send, "m_hViewModel", slot);
-        if (viewmodel <= MaxClients || !IsValidEdict(viewmodel))
-        {
-            continue;
-        }
-
-        if (g_bViewModelReady && g_iViewModelIndex != -1)
-        {
-            SetEntityModel(viewmodel, MODEL_FLASHBANG_VIEW);
-            SetEntProp(viewmodel, Prop_Send, "m_nModelIndex", g_iViewModelIndex);
-            SetEntProp(viewmodel, Prop_Data, "m_nModelIndex", g_iViewModelIndex);
-        }
-        else if (g_bProjectileModelReady && g_iProjectileModelIndex != -1)
-        {
-            SetEntityModel(viewmodel, MODEL_FLASHBANG_PROJECTILE);
-            SetEntProp(viewmodel, Prop_Send, "m_nModelIndex", g_iProjectileModelIndex);
-            SetEntProp(viewmodel, Prop_Data, "m_nModelIndex", g_iProjectileModelIndex);
-        }
-
-        SetEntProp(viewmodel, Prop_Send, "m_nSkin", skin);
-        SetEntProp(viewmodel, Prop_Data, "m_nSkin", skin);
-        SetEntityRenderMode(viewmodel, RENDER_TRANSCOLOR);
-        SetEntityRenderColor(viewmodel, r, g, b, 255);
-    }
+    ApplyFlashPlayerViewmodels(client, skin, r, g, b);
 }
 
 void UpdateActiveFlashViewmodel(int client)
@@ -416,6 +520,72 @@ void UpdateActiveFlashViewmodel(int client)
     {
         ApplyFlashWeaponViewmodel(client, active);
     }
+}
+
+void ApplyFlashPlayerViewmodels(int client, int skin, int r, int g, int b)
+{
+    if (!IsClientActive(client))
+    {
+        return;
+    }
+
+    // Обновляем viewmodel, который возвращает prop m_hViewModel
+    for (int slot = 0; slot < 2; slot++)
+    {
+        int viewmodel = GetEntPropEnt(client, Prop_Send, "m_hViewModel", slot);
+        if (viewmodel > MaxClients && IsValidEdict(viewmodel))
+        {
+            ApplyFlashSkinToEntity(viewmodel, skin, r, g, b, true);
+        }
+    }
+
+    // А также predicated_viewmodel (как делает weaponmodels.sp)
+    int entity = -1;
+    while ((entity = FindEntityByClassname(entity, "predicted_viewmodel")) != -1)
+    {
+        if (GetEntPropEnt(entity, Prop_Send, "m_hOwner") != client)
+        {
+            continue;
+        }
+
+        ApplyFlashSkinToEntity(entity, skin, r, g, b, true);
+    }
+}
+
+void ApplyFlashSkinToEntity(int entity, int skin, int r, int g, int b, bool isViewModel)
+{
+    if (isViewModel)
+    {
+        if (g_bViewModelReady && g_iViewModelIndex != -1)
+        {
+            SetEntityModel(entity, MODEL_FLASHBANG_VIEW);
+            SetEntProp(entity, Prop_Send, "m_nModelIndex", g_iViewModelIndex);
+            SetEntProp(entity, Prop_Data, "m_nModelIndex", g_iViewModelIndex);
+        }
+        else if (g_bProjectileModelReady && g_iProjectileModelIndex != -1)
+        {
+            SetEntityModel(entity, MODEL_FLASHBANG_PROJECTILE);
+            SetEntProp(entity, Prop_Send, "m_nModelIndex", g_iProjectileModelIndex);
+            SetEntProp(entity, Prop_Data, "m_nModelIndex", g_iProjectileModelIndex);
+        }
+    }
+    else if (g_bWorldModelReady && g_iWorldModelIndex != -1)
+    {
+        SetEntityModel(entity, MODEL_FLASHBANG_WORLD);
+        SetEntProp(entity, Prop_Send, "m_nModelIndex", g_iWorldModelIndex);
+        SetEntProp(entity, Prop_Data, "m_nModelIndex", g_iWorldModelIndex);
+    }
+    else if (g_bProjectileModelReady && g_iProjectileModelIndex != -1)
+    {
+        SetEntityModel(entity, MODEL_FLASHBANG_PROJECTILE);
+        SetEntProp(entity, Prop_Send, "m_nModelIndex", g_iProjectileModelIndex);
+        SetEntProp(entity, Prop_Data, "m_nModelIndex", g_iProjectileModelIndex);
+    }
+
+    SetEntProp(entity, Prop_Send, "m_nSkin", skin);
+    SetEntProp(entity, Prop_Data, "m_nSkin", skin);
+    SetEntityRenderMode(entity, RENDER_TRANSCOLOR);
+    SetEntityRenderColor(entity, r, g, b, 255);
 }
 
 public void OnWeaponSwitchPost(int client, int weapon)
@@ -485,11 +655,15 @@ int ResolveFlashOwner(int entity)
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 {
     g_bRoundActive = true;
+
+    ResetTrackedFlashEntities();
 }
 
 public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 {
     g_bRoundActive = false;
+
+    ResetTrackedFlashEntities();
 }
 
 // === МЕНЮ ===
