@@ -3,8 +3,8 @@
  * Counter-Strike: Source (OrangeBox) — SourceMod plugin
  *
  * Функции:
- *  - Меню: 1) Выбрать скин (Fullbright / Shadow / Wireframe), 2) Выбрать цвет
- *  - Меняет модель и скин flashbang_projectile на кастомную
+ *  - Меню: 1) Выбрать стиль (Fullbright / NoShadows / Wireframe), 2) Выбрать цвет
+ *  - Меняет модель flashbang_projectile и viewmodel на кастомную
  *  - Красит гранату в выбранный цвет
  *  - Сохраняет выбор игрока (через clientprefs cookies)
  *  - Применяет изменения только с начала раунда (не с начала карты)
@@ -18,13 +18,14 @@
 #include <clientprefs>
 
 #pragma semicolon 1
+#pragma newdecls required
 
 public Plugin myinfo =
 {
-    name        = "Flashbang Model & Color (CS:S)",
+    name        = "Flashbang Viewmodel Styler (CS:S)",
     author      = "ChatGPT",
-    description = "Смена модели/скина и цвета flashbang_projectile, меню + сохранение",
-    version     = "1.0.0",
+    description = "Позволяет выбрать стиль first person флешки (Fullbright/NoShadows/Wireframe) и её цвет",
+    version     = "1.1.0",
     url         = ""
 };
 
@@ -74,15 +75,34 @@ static const char DOWNLOADS[][] =
 
 // === СКИНЫ ===
 // Предполагается, что модель скомпилирована с 4 skin-family под эти VMT:
-// 0: default, 1: noshadows (Fullbright), 2: shadows (Shadow), 3: wireframe (Wireframe)
+// 0: default, 1: fullbright (unlit), 2: noshadows (lit без теней), 3: wireframe
 // Если в вашей сборке порядок иной, поправьте индексы ниже.
 enum SkinStyle
 {
-    SKIN_DEFAULT   = 0,
-    SKIN_FULLBRIGHT= 1, // UnlitGeneric — яркий без освещения
-    SKIN_SHADOW    = 2, // VertexLitGeneric — с тенями
-    SKIN_WIREFRAME = 3  // Wireframe
+    SKIN_DEFAULT    = 0,
+    SKIN_FULLBRIGHT = 1,
+    SKIN_NOSHADOWS  = 2,
+    SKIN_WIREFRAME  = 3
 };
+
+static const char g_sSkinLabels[][] =
+{
+    "Default",
+    "Fullbright",
+    "NoShadows",
+    "Wireframe"
+};
+
+int GetSkinIndex(SkinStyle style)
+{
+    switch (style)
+    {
+        case SKIN_FULLBRIGHT: return 1;
+        case SKIN_NOSHADOWS:  return 2;
+        case SKIN_WIREFRAME:  return 3;
+    }
+    return 0;
+}
 
 // === КУКИ ДЛЯ СОХРАНЕНИЯ ===
 Handle g_hCookieSkin;   // int
@@ -177,7 +197,7 @@ int PrecacheFlashModel(const char[] path, const char[] tag)
 
 void ResetClientSettings(int client)
 {
-    g_iSkin[client] = SKIN_WIREFRAME; // дефолт — Wireframe
+    g_iSkin[client] = view_as<int>(SKIN_FULLBRIGHT);
     g_iColor[client][0] = 255;
     g_iColor[client][1] = 255;
     g_iColor[client][2] = 255;
@@ -236,6 +256,7 @@ public void OnClientDisconnect_Post(int client)
 public void OnClientCookiesCached(int client)
 {
     LoadClientSettings(client);
+    UpdateActiveFlashViewmodel(client);
 }
 
 
@@ -303,7 +324,8 @@ void ApplyFlashSettings(int entity, int owner)
         SetEntProp(entity, Prop_Data, "m_nModelIndex", g_iProjectileModelIndex);
     }
 
-    int skin = g_iSkin[owner];
+    SkinStyle style = view_as<SkinStyle>(g_iSkin[owner]);
+    int skin = GetSkinIndex(style);
     SetEntProp(entity, Prop_Send, "m_nSkin", skin);
     SetEntProp(entity, Prop_Data, "m_nSkin", skin);
 
@@ -321,7 +343,8 @@ void ApplyFlashWeaponViewmodel(int client, int weapon)
         return;
     }
 
-    int skin = g_iSkin[client];
+    SkinStyle style = view_as<SkinStyle>(g_iSkin[client]);
+    int skin = GetSkinIndex(style);
     int r = g_iColor[client][0];
     int g = g_iColor[client][1];
     int b = g_iColor[client][2];
@@ -485,6 +508,14 @@ int ResolveFlashOwner(int entity)
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 {
     g_bRoundActive = true;
+
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (IsClientInGame(i))
+        {
+            UpdateActiveFlashViewmodel(i);
+        }
+    }
 }
 
 public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
@@ -499,7 +530,7 @@ public Action CmdOpenMenu(int client, int args)
 
     Menu m = new Menu(MenuHandler_Main);
     m.SetTitle("Настройки флешки");
-    m.AddItem("skin",  "1. Выбрать скин");
+    m.AddItem("skin",  "1. Выбрать стиль");
     m.AddItem("color", "2. Выбрать цвет");
     m.ExitButton = true;
     m.Display(client, 20);
@@ -532,10 +563,10 @@ public int MenuHandler_Main(Menu m, MenuAction action, int client, int item)
 void OpenSkinMenu(int client)
 {
     Menu s = new Menu(MenuHandler_Skin);
-    s.SetTitle("Выбрать скин");
-    s.AddItem("1", "Скин 1");   // SKIN_FULLBRIGHT (1)
-    s.AddItem("2", "Скин 2");       // SKIN_SHADOW (2)
-    s.AddItem("3", "Скин 3");    // SKIN_WIREFRAME (3)
+    s.SetTitle("Выбрать стиль флешки");
+    s.AddItem("1", "Fullbright");
+    s.AddItem("2", "NoShadows");
+    s.AddItem("3", "Wireframe");
     s.ExitBackButton = true;
     s.Display(client, 20);
 }
@@ -555,21 +586,26 @@ public int MenuHandler_Skin(Menu s, MenuAction action, int client, int item)
         char info[8];
         s.GetItem(item, info, sizeof(info));
         int choice = StringToInt(info);
-        int skin = SKIN_FULLBRIGHT;
-        if (choice == 1) skin = SKIN_FULLBRIGHT;
-        else if (choice == 2) skin = SKIN_SHADOW;
-        else if (choice == 3) skin = SKIN_WIREFRAME;
+        SkinStyle style = SKIN_FULLBRIGHT;
+        if (choice == 2)
+        {
+            style = SKIN_NOSHADOWS;
+        }
+        else if (choice == 3)
+        {
+            style = SKIN_WIREFRAME;
+        }
 
-        g_iSkin[client] = skin;
+        g_iSkin[client] = view_as<int>(style);
 
         // Сохранить
         char buff[16];
-        IntToString(skin, buff, sizeof(buff));
+        IntToString(view_as<int>(style), buff, sizeof(buff));
         SetClientCookie(client, g_hCookieSkin, buff);
 
         UpdateActiveFlashViewmodel(client);
 
-        PrintToChat(client, "\x04[Flash]\x01 Скин установлен: \x03%s", (skin==SKIN_FULLBRIGHT)?"Fullbright":(skin==SKIN_SHADOW)?"Shadow":"Wireframe");
+        PrintToChat(client, "\x04[Flash]\x01 Стиль установлен: \x03%s", g_sSkinLabels[view_as<int>(style)]);
         OpenSkinMenu(client);
     }
     return 0;
