@@ -55,10 +55,26 @@ stock bool Client_IsInAdminGroup(int client, const char[] group, bool defaultAll
     return defaultAllow;
 }
 #endif
-#include <smartdm>
+#tryinclude <smartdm>
+#if !defined _smartdm_included
+#define _smartdm_included
+stock void Downloader_AddFileToDownloadsTable(const char[] file)
+{
+    // SmartDM not available; skip adding download entries.
+}
+#endif
+
 #undef REQUIRE_PLUGIN
-#include <zombiereloaded>
+#tryinclude <zombiereloaded>
 #define REQUIRE_PLUGIN
+
+#if !defined _zombiereloaded_included
+#define _zombiereloaded_included
+stock bool ZR_IsClientZombie(int client)
+{
+    return false;
+}
+#endif
 
 #define EOS '\0'
 #define CSS_WEAPON_NUMBER 40
@@ -119,9 +135,9 @@ new Handle:g_AskUserIfTheyWantPublicSkins;
 new Handle:trie;
 new OFFSET_THROWER;
 new ToReloadnumusers = 0;
-new String:G_SteamID[MAXPLAYERS+1][50]
+new String:G_SteamID[MAXPLAYERS+1][50];
 //
-new weapondefaultpc[40]
+new weapondefaultpc[40];
 
 enum FlashSkinOption
 {
@@ -449,7 +465,7 @@ public Action:FetchClientSettings(Handle:timer, any:client)
 	if(client < 1 || client > MAXPLAYERS)	return;
 	
 	new String:steamid[50];
-	GetClientAuthString(client, steamid, sizeof(steamid))
+	GetClientAuthString(client, steamid, sizeof(steamid));
 	G_SteamID[client] = steamid;
 	////////////////////////
 	//new String:GoGoFetch[100];
@@ -457,7 +473,7 @@ public Action:FetchClientSettings(Handle:timer, any:client)
 	//SQL_TQuery(h_DB, LoadDefinitions, GoGoFetch, client);
 	Tellm(client);
 	////////////////////////
-	new String:DoesItEvenExist[128]
+	new String:DoesItEvenExist[128];
 	Format(DoesItEvenExist, sizeof(DoesItEvenExist), "SELECT * FROM wmodels WHERE SteamID = '%s'", steamid);
 	SQL_TQuery(h_DB, LoadUserStuff, DoesItEvenExist, client);
 	/*
@@ -681,7 +697,7 @@ public Action:Command_Say(client, const String:command[], args)
 			{
 				new chat_flag;
 				new String:flag[2];
-				GetConVarString(g_AccessFlag, flag, sizeof(flag))
+				GetConVarString(g_AccessFlag, flag, sizeof(flag));
 				chat_flag = ReadFlagString(flag);
 				if(GetUserFlagBits(client) & chat_flag) Interface_Menu(client);
 				else (CPrintToChatEx(client,client, "%t", "NotAllowedToAcessMainMenu"));
@@ -690,7 +706,7 @@ public Action:Command_Say(client, const String:command[], args)
 			else if (StrEqual(method, "group", true))
 			{
 				new String:group[16];
-				GetConVarString(g_AccessGroup, group, sizeof(group))
+				GetConVarString(g_AccessGroup, group, sizeof(group));
 				if(Client_IsInAdminGroup(client, group, false)) Interface_Menu(client);
 				else (CPrintToChatEx(client,client, "%t", "NotAllowedToAcessMainMenu"));
 			
@@ -1266,7 +1282,7 @@ Specific_weapon_menu(client, String:weapon[], itemnum = 0)
 				Format(WhatIsGoingToBeDisplayed, sizeof(WhatIsGoingToBeDisplayed), "%s \n%s", weapon_info[WeaponInt][x][Name], weapon_info[WeaponInt][x][Description]);
 			}
 		}
-		new String:Position[4]
+		new String:Position[4];
 		IntToString(x, Position, sizeof(Position));
 		if (weapon_info[WeaponInt][x][Flag][0] != EOS)
 		{
@@ -1647,7 +1663,7 @@ public Action:InitGrenade(Handle:timer, any:iGrenade)
 public OnPostThinkPost(client)
 {
 	decl String:cvarvaluel[3];
-	GetConVarString(g_VModelsEnabled, cvarvaluel , sizeof(cvarvaluel))
+	GetConVarString(g_VModelsEnabled, cvarvaluel , sizeof(cvarvaluel));
 	new cvarivalueu = StringToInt(cvarvaluel);
 	if (cvarivalueu == 0)		return;
 	
@@ -1657,14 +1673,14 @@ public OnPostThinkPost(client)
 	{
 		decl chat_flag;
 		decl String:flag[2];
-		GetConVarString(g_AccessFlag, flag, sizeof(flag))
+		GetConVarString(g_AccessFlag, flag, sizeof(flag));
 		chat_flag = ReadFlagString(flag);
 		if(!(GetUserFlagBits(client) & chat_flag))		return;
 	}
 	else if (StrEqual(method, "group", true))
 	{
 		decl String:group[16];
-		GetConVarString(g_AccessGroup, group, sizeof(group))
+		GetConVarString(g_AccessGroup, group, sizeof(group));
 		if(!Client_IsInAdminGroup(client, group, false)) return;
 			
 	}
@@ -1941,7 +1957,7 @@ public Client_Death(client)
 		}
 	}
 	new String:cvarivalued[3];
-	GetConVarString(g_WModelsEnabled, cvarivalued , sizeof(cvarivalued))
+	GetConVarString(g_WModelsEnabled, cvarivalued , sizeof(cvarivalued));
 	//new cvarivalued2 = StringToInt(cvarivalued);
 	//if(cvarivalued2 == 1)	CreateTimer(0.01, ChangeDroppedModel, client);
 }
@@ -2009,14 +2025,14 @@ public Action:Command_Drop(client, const String:command[], argc)
 	{
 		decl chat_flag;
 		decl String:flag[2];
-		GetConVarString(g_AccessFlag, flag, sizeof(flag))
+		GetConVarString(g_AccessFlag, flag, sizeof(flag));
 		chat_flag = ReadFlagString(flag);
 		if(!(GetUserFlagBits(client) & chat_flag))		return Plugin_Continue;
 	}
 	else if (StrEqual(method, "group", true))
 	{
 		decl String:group[16];
-		GetConVarString(g_AccessGroup, group, sizeof(group))
+		GetConVarString(g_AccessGroup, group, sizeof(group));
 		if(!Client_IsInAdminGroup(client, group, false)) return Plugin_Continue;
 			
 	}
@@ -2032,7 +2048,7 @@ public Action:DroppedWeapon(Handle:timer, any:data)
 	new clientd = ReadPackCell(data);
 	CloseHandle(data);
 	decl String:cvarvaluez[3];
-	GetConVarString(g_WModelsEnabled, cvarvaluez , sizeof(cvarvaluez))
+	GetConVarString(g_WModelsEnabled, cvarvaluez , sizeof(cvarvaluez));
 	new cvarivalued = StringToInt(cvarvaluez);
 	if (cvarivalued == 0)		return Plugin_Stop;
 	if (!(clientd <= 0 || clientd > MaxClients))
@@ -2059,7 +2075,7 @@ public Action:OnPlayerRunCmd(client, &iButtons, &Impulse, Float:fVelocity[3], Fl
 	new iActiveWeapon = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
 	if (!IsValidEdict(iActiveWeapon))	return;
 	decl String:cvarvalue[3];
-	GetConVarString(g_EnableDropModels, cvarvalue , sizeof(cvarvalue))
+	GetConVarString(g_EnableDropModels, cvarvalue , sizeof(cvarvalue));
 	new cvarivalue = StringToInt(cvarvalue);
 	if (cvarivalue == 0)		return;
 	decl String:method[10];
@@ -2068,14 +2084,14 @@ public Action:OnPlayerRunCmd(client, &iButtons, &Impulse, Float:fVelocity[3], Fl
 	{
 		decl chat_flag;
 		decl String:flag[2];
-		GetConVarString(g_AccessFlag, flag, sizeof(flag))
+		GetConVarString(g_AccessFlag, flag, sizeof(flag));
 		chat_flag = ReadFlagString(flag);
 		if(!(GetUserFlagBits(client) & chat_flag))		return;
 	}
 	else if (StrEqual(method, "group", true))
 	{
 		decl String:group[16];
-		GetConVarString(g_AccessGroup, group, sizeof(group))
+		GetConVarString(g_AccessGroup, group, sizeof(group));
 		if(!Client_IsInAdminGroup(client, group, false)) return;
 			
 	}
@@ -2100,7 +2116,7 @@ public WeaponSwitchPost(client, iActiveWeapon)
 
 	if (!IsValidEdict(iActiveWeapon))	return;
 	decl String:cvarvalue[3];
-	GetConVarString(g_EnableDropModels, cvarvalue , sizeof(cvarvalue))
+	GetConVarString(g_EnableDropModels, cvarvalue , sizeof(cvarvalue));
 	new cvarivalue = StringToInt(cvarvalue);
 	if (cvarivalue == 0)		return;
 	decl String:method[10];
@@ -2109,14 +2125,14 @@ public WeaponSwitchPost(client, iActiveWeapon)
 	{
 		decl chat_flag;
 		decl String:flag[2];
-		GetConVarString(g_AccessFlag, flag, sizeof(flag))
+		GetConVarString(g_AccessFlag, flag, sizeof(flag));
 		chat_flag = ReadFlagString(flag);
 		if(!(GetUserFlagBits(client) & chat_flag))		return;
 	}
 	else if (StrEqual(method, "group", true))
 	{
 		decl String:group[16];
-		GetConVarString(g_AccessGroup, group, sizeof(group))
+		GetConVarString(g_AccessGroup, group, sizeof(group));
 		if(!Client_IsInAdminGroup(client, group, false)) return;
 			
 	}
@@ -2135,7 +2151,7 @@ public WeaponSwitchPost(client, iActiveWeapon)
 Tellm(client)
 {
 		new String:steamid[32];
-		GetClientAuthString(client, steamid, sizeof(steamid))
+                GetClientAuthString(client, steamid, sizeof(steamid));
 		new String:GoGoFetch[100];
 		Format(GoGoFetch, sizeof(GoGoFetch), "SELECT viewm,worldm FROM `wmodels` WHERE SteamID = '%s'", steamid);
 		SQL_TQuery(h_DB, LoadDefinitions, GoGoFetch, client);
@@ -2189,7 +2205,7 @@ public Event_C4Planted(Handle:event, const String:name[], bool:dontBroadcast)
 public Action:C4Planted(Handle:timer, any:client)
 {
 	decl String:cvarvaluez[3];
-	GetConVarString(g_WModelsEnabled, cvarvaluez , sizeof(cvarvaluez))
+	GetConVarString(g_WModelsEnabled, cvarvaluez , sizeof(cvarvaluez));
 	new cvarivalued = StringToInt(cvarvaluez);
 	if (cvarivalued == 0)		return;
 	if (client > 0 && client <= MaxClients)
