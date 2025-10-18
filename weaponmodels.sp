@@ -2,7 +2,26 @@
 #include <sdktools>
 #include <sdkhooks>
 #include <cstrike>
-#include <morecolors>
+#tryinclude <morecolors>
+#if !defined _morecolors_included
+stock void CPrintToChat(int client, const char[] format, any ...)
+{
+    static char buffer[256];
+
+    SetGlobalTransTarget(client);
+    VFormat(buffer, sizeof(buffer), format, 3);
+    PrintToChat(client, "%s", buffer);
+}
+
+stock void CPrintToChatEx(int client, int author, const char[] format, any ...)
+{
+    static char buffer[256];
+
+    SetGlobalTransTarget(client);
+    VFormat(buffer, sizeof(buffer), format, 4);
+    PrintToChat(client, "%s", buffer);
+}
+#endif
 #include <smlib>
 #include <smartdm>
 #undef REQUIRE_PLUGIN
