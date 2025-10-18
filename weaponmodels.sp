@@ -2,12 +2,79 @@
 #include <sdktools>
 #include <sdkhooks>
 #include <cstrike>
-#include <morecolors>
-#include <smlib>
-#include <smartdm>
+#tryinclude <morecolors>
+#if !defined _morecolors_included
+stock void CPrintToChat(int client, const char[] format, any ...)
+{
+    static char buffer[256];
+
+    SetGlobalTransTarget(client);
+    VFormat(buffer, sizeof(buffer), format, 3);
+    PrintToChat(client, "%s", buffer);
+}
+
+stock void CPrintToChatEx(int client, int author, const char[] format, any ...)
+{
+    static char buffer[256];
+
+    SetGlobalTransTarget(client);
+    VFormat(buffer, sizeof(buffer), format, 4);
+    PrintToChat(client, "%s", buffer);
+}
+#endif
+#tryinclude <smlib>
+#if !defined _smlib_included
+stock bool Client_IsInAdminGroup(int client, const char[] group, bool defaultAllow = false)
+{
+    if (group[0] == EOS)
+    {
+        return defaultAllow;
+    }
+
+    if (!IsClientInGame(client))
+    {
+        return defaultAllow;
+    }
+
+    AdminId admin = GetUserAdmin(client);
+    if (admin == INVALID_ADMIN_ID)
+    {
+        return defaultAllow;
+    }
+
+    char groupName[64];
+    int index;
+    for (index = 0; GetAdminGroup(admin, index, groupName, sizeof(groupName)); index++)
+    {
+        if (StrEqual(groupName, group, false))
+        {
+            return true;
+        }
+    }
+
+    return defaultAllow;
+}
+#endif
+#tryinclude <smartdm>
+#if !defined _smartdm_included
+#define _smartdm_included
+stock void Downloader_AddFileToDownloadsTable(const char[] file)
+{
+    // SmartDM not available; skip adding download entries.
+}
+#endif
+
 #undef REQUIRE_PLUGIN
-#include <zombiereloaded>
+#tryinclude <zombiereloaded>
 #define REQUIRE_PLUGIN
+
+#if !defined _zombiereloaded_included
+#define _zombiereloaded_included
+stock bool ZR_IsClientZombie(int client)
+{
+    return false;
+}
+#endif
 
 #define EOS '\0'
 #define CSS_WEAPON_NUMBER 40
@@ -68,9 +135,76 @@ new Handle:g_AskUserIfTheyWantPublicSkins;
 new Handle:trie;
 new OFFSET_THROWER;
 new ToReloadnumusers = 0;
-new String:G_SteamID[MAXPLAYERS+1][50]
+new String:G_SteamID[MAXPLAYERS+1][50];
 //
-new weapondefaultpc[40]
+new weapondefaultpc[40];
+
+enum FlashSkinOption
+{
+    FlashSkin_Shadows = 0,
+    FlashSkin_NoShadows,
+    FlashSkin_Wireframe
+};
+
+enum FlashColorOption
+{
+    FlashColor_White = 0,
+    FlashColor_Red,
+    FlashColor_Green,
+    FlashColor_Yellow,
+    FlashColor_Purple,
+    FlashColor_Aqua
+};
+
+new FlashSkinOption:g_FlashSkinPreference[MAXPLAYERS + 1];
+new FlashColorOption:g_FlashColorPreference[MAXPLAYERS + 1];
+new bool:g_FlashViewmodelActive[MAXPLAYERS + 1];
+new g_FlashApplyRetries[MAXPLAYERS + 1];
+
+new const String:g_FlashSkinMaterialPaths[][PLATFORM_MAX_PATH] =
+{
+    "models/weapons/v_models/v_eq_flashbang/shadows",
+    "models/weapons/v_models/v_eq_flashbang/noshadows",
+    "models/weapons/v_models/v_eq_flashbang/wireframe"
+};
+
+new const String:g_FlashSkinDisplay[][32] =
+{
+    "Shadows",
+    "NoShadows",
+    "Wireframe"
+};
+
+new const String:g_FlashColorDisplay[][32] =
+{
+    "Белый",
+    "Красный",
+    "Зеленый",
+    "Желтый",
+    "Пурпурный",
+    "Аква"
+};
+
+new const g_FlashColorValues[][3] =
+{
+    {255, 255, 255},
+    {255, 0, 0},
+    {0, 255, 0},
+    {255, 255, 0},
+    {128, 0, 128},
+    {0, 255, 255}
+};
+
+new const String:g_FlashMaterialFiles[][PLATFORM_MAX_PATH] =
+{
+    "materials/models/weapons/v_models/v_eq_flashbang/default.vmt",
+    "materials/models/weapons/v_models/v_eq_flashbang/shadows.vmt",
+    "materials/models/weapons/v_models/v_eq_flashbang/noshadows.vmt",
+    "materials/models/weapons/v_models/v_eq_flashbang/wireframe.vmt",
+    "materials/models/weapons/v_models/v_eq_flashbang/shadows.vtf",
+    "materials/models/weapons/v_models/v_eq_flashbang/noshadows.vtf",
+    "materials/models/weapons/v_models/v_eq_flashbang/wireframe.vtf"
+};
 new static String:weaponVDefaultModels[][] = 
 {
 {"models/weapons/v_rif_ak47.mdl"},
@@ -249,16 +383,20 @@ public NativeActiveWModel(Handle:plugin, numParams) {
 
 public OnClientPutInServer(client)
 {
-	SDKHook(client, SDKHook_PostThinkPost, OnPostThinkPost);
-	SDKHook(client, SDKHook_WeaponEquipPost, WeaponEquip_CallBackPosto); 
-	SDKHook(client, SDKHook_OnTakeDamagePost, OnTakeDamagePost);
-	SDKHook(client, SDKHook_WeaponSwitchPost, WeaponSwitchPost);
-	SDKHook(client, SDKHook_PostThink, OnPostThink);
-	//SDKHook(client, SDKHook_WeaponDropPost, WeaponDropPost);
-	//SDKHook(client, SDKHook_WeaponEquipPost, WeaponEquip_CallBack); 
-	//SDKHook(client, SDKHook_WeaponDropPost, OnWeaponDropPost);
-	//if(client > 0 && client < MAXPLAYERS+1) CreateTimer(1.0, FetchClientSettings, client);
-	//SDKHook(client, SDKHook_WeaponEquip, WeaponEquip_CallBackk);
+        SDKHook(client, SDKHook_PostThinkPost, OnPostThinkPost);
+        SDKHook(client, SDKHook_WeaponEquipPost, WeaponEquip_CallBackPosto);
+        SDKHook(client, SDKHook_OnTakeDamagePost, OnTakeDamagePost);
+        SDKHook(client, SDKHook_WeaponSwitchPost, WeaponSwitchPost);
+        SDKHook(client, SDKHook_PostThink, OnPostThink);
+        //SDKHook(client, SDKHook_WeaponDropPost, WeaponDropPost);
+        //SDKHook(client, SDKHook_WeaponEquipPost, WeaponEquip_CallBack);
+        //SDKHook(client, SDKHook_WeaponDropPost, OnWeaponDropPost);
+        //if(client > 0 && client < MAXPLAYERS+1) CreateTimer(1.0, FetchClientSettings, client);
+        //SDKHook(client, SDKHook_WeaponEquip, WeaponEquip_CallBackk);
+        g_FlashSkinPreference[client] = FlashSkin_Shadows;
+        g_FlashColorPreference[client] = FlashColor_White;
+        g_FlashViewmodelActive[client] = false;
+        g_FlashApplyRetries[client] = 0;
 }
 
 public Action:AskClient(Handle:Timer, any:serial)
@@ -302,8 +440,8 @@ public OnClientPostAdminCheck(client)	{	if(client > 0 && client <= MaxClients) C
 
 public OnClientDisconnect(client)
 {
-	if(IsClientInGame(client))
-	{
+        if(IsClientInGame(client))
+        {
 		//SDKUnhook(client, SDKHook_PostThinkPost, OnPostThinkPost);
 		//SDKUnhook(client, SDKHook_WeaponEquipPost, WeaponEquip_CallBack);
 		//Save stuff
@@ -314,9 +452,11 @@ public OnClientDisconnect(client)
 			Format(qwery, sizeof(qwery), "%s`%i` = '%i', ", qwery, i, client_wepskin_index[client][i]);
 		}
 		Format(qwery, sizeof(qwery), "%s`30` = '%i' WHERE `SteamID` = '%s'", qwery, client_wepskin_index[client][30], G_SteamID[client]);
-		SQL_TQuery(h_DB,SQL_DoNothing, qwery);
-		strcopy(G_SteamID[client], sizeof(G_SteamID[]), "BOT");
-	}
+                SQL_TQuery(h_DB,SQL_DoNothing, qwery);
+                strcopy(G_SteamID[client], sizeof(G_SteamID[]), "BOT");
+        }
+        g_FlashViewmodelActive[client] = false;
+        g_FlashApplyRetries[client] = 0;
 }
 
 public Action:FetchClientSettings(Handle:timer, any:client)
@@ -325,7 +465,7 @@ public Action:FetchClientSettings(Handle:timer, any:client)
 	if(client < 1 || client > MAXPLAYERS)	return;
 	
 	new String:steamid[50];
-	GetClientAuthString(client, steamid, sizeof(steamid))
+	GetClientAuthString(client, steamid, sizeof(steamid));
 	G_SteamID[client] = steamid;
 	////////////////////////
 	//new String:GoGoFetch[100];
@@ -333,7 +473,7 @@ public Action:FetchClientSettings(Handle:timer, any:client)
 	//SQL_TQuery(h_DB, LoadDefinitions, GoGoFetch, client);
 	Tellm(client);
 	////////////////////////
-	new String:DoesItEvenExist[128]
+	new String:DoesItEvenExist[128];
 	Format(DoesItEvenExist, sizeof(DoesItEvenExist), "SELECT * FROM wmodels WHERE SteamID = '%s'", steamid);
 	SQL_TQuery(h_DB, LoadUserStuff, DoesItEvenExist, client);
 	/*
@@ -491,19 +631,33 @@ public Action:LoadConfigs(Handle:timer, any:none)
 
 public OnMapStart()
 {
-	if(h_DB == INVALID_HANDLE)
-	{
-		SQL_TConnect(OnDatabaseConnect, "wmodels");
-	}	
-	//InitConfigFile();
-	Init_Timer(INVALID_HANDLE);
-	for(new i = 0; i < sizeof(weaponVDefaultModels);i++)
-	{
-		if(weaponVDefaultModels[i][0] != EOS)
-		{
-			weapondefaultpc[i] = PrecacheModel(weaponVDefaultModels[i]);
-		}
-	}
+        if(h_DB == INVALID_HANDLE)
+        {
+                SQL_TConnect(OnDatabaseConnect, "wmodels");
+        }
+        //InitConfigFile();
+        Init_Timer(INVALID_HANDLE);
+        for(new i = 0; i < sizeof(weaponVDefaultModels);i++)
+        {
+                if(weaponVDefaultModels[i][0] != EOS)
+                {
+                        weapondefaultpc[i] = PrecacheModel(weaponVDefaultModels[i]);
+                }
+        }
+        PrecacheFlashbangMaterials();
+}
+
+
+stock PrecacheFlashbangMaterials()
+{
+        for (new i = 0; i < sizeof(g_FlashMaterialFiles); i++)
+        {
+                if (FileExists(g_FlashMaterialFiles[i]))
+                {
+                        PrecacheGeneric(g_FlashMaterialFiles[i], true);
+                        AddFileToDownloadsTable(g_FlashMaterialFiles[i]);
+                }
+        }
 }
 
 
@@ -543,7 +697,7 @@ public Action:Command_Say(client, const String:command[], args)
 			{
 				new chat_flag;
 				new String:flag[2];
-				GetConVarString(g_AccessFlag, flag, sizeof(flag))
+				GetConVarString(g_AccessFlag, flag, sizeof(flag));
 				chat_flag = ReadFlagString(flag);
 				if(GetUserFlagBits(client) & chat_flag) Interface_Menu(client);
 				else (CPrintToChatEx(client,client, "%t", "NotAllowedToAcessMainMenu"));
@@ -552,7 +706,7 @@ public Action:Command_Say(client, const String:command[], args)
 			else if (StrEqual(method, "group", true))
 			{
 				new String:group[16];
-				GetConVarString(g_AccessGroup, group, sizeof(group))
+				GetConVarString(g_AccessGroup, group, sizeof(group));
 				if(Client_IsInAdminGroup(client, group, false)) Interface_Menu(client);
 				else (CPrintToChatEx(client,client, "%t", "NotAllowedToAcessMainMenu"));
 			
@@ -879,55 +1033,76 @@ Menu_Def(client)
 		Format(entry, sizeof(entry), "%t", "Disable World Models");
 		AddMenuItem(def_menu, "disworld", entry);
 	}
-	if(!WorldModelsEnabled[client]) 
-	{
-		Format(entry, sizeof(entry), "%t", "Enable World Models");
-		AddMenuItem(def_menu, "enaworld", entry);
-	}
-	SetMenuTitle(def_menu, "%t", "Definitions Title");
-	SetMenuExitBackButton(def_menu, true);
-	DisplayMenu(def_menu, client, MENU_TIME_FOREVER);
+        if(!WorldModelsEnabled[client])
+        {
+                Format(entry, sizeof(entry), "%t", "Enable World Models");
+                AddMenuItem(def_menu, "enaworld", entry);
+        }
+        Format(entry, sizeof(entry), "Flashbang Skin: %s", g_FlashSkinDisplay[g_FlashSkinPreference[client]]);
+        AddMenuItem(def_menu, "flashskin", entry);
+        Format(entry, sizeof(entry), "Flashbang Color: %s", g_FlashColorDisplay[g_FlashColorPreference[client]]);
+        AddMenuItem(def_menu, "flashcolor", entry);
+        SetMenuTitle(def_menu, "%t", "Definitions Title");
+        SetMenuExitBackButton(def_menu, true);
+        DisplayMenu(def_menu, client, MENU_TIME_FOREVER);
 }
 
 
 public Def_Options(Handle:def_menu, MenuAction:action, param1, param2)
 {
 	
-	if (action == MenuAction_Select)
-	{
-		if(param1 < 1) return;
-		new String:steamid[30];
-		GetClientAuthString(param1, steamid, sizeof(steamid));
-		new String:QuerySQL[100];
-		
-		new String:info[38];
-		GetMenuItem(def_menu, param2, info, sizeof(info));
-		
-		if (StrEqual(info, "disview"))
-		{
-			Format(QuerySQL, sizeof(QuerySQL), "UPDATE `wmodels` SET `viewm` = '0' WHERE `SteamID` = '%s'", steamid);
-			ViewModelsEnabled[param1] = false;
-		}
-		if (StrEqual(info, "enaview"))
-		{
-			Format(QuerySQL, sizeof(QuerySQL), "UPDATE `wmodels` SET `viewm` = '1' WHERE `SteamID` = '%s'", steamid);
-			ViewModelsEnabled[param1] = true;
-		}
-		if (StrEqual(info, "disworld"))
-		{
-			Format(QuerySQL, sizeof(QuerySQL), "UPDATE `wmodels` SET `worldm` = '0' WHERE `SteamID` = '%s'", steamid);
-			WorldModelsEnabled[param1] = false;
-		}
-		
-		if (StrEqual(info, "enaworld"))
-		{
-			Format(QuerySQL, sizeof(QuerySQL), "UPDATE `wmodels` SET `worldm` = '1' WHERE `SteamID` = '%s'", steamid);
-			WorldModelsEnabled[param1] = true;
-		}
-		SQL_TQuery(h_DB, SQL_DoNothing, QuerySQL);
-		//SQL_FastQuery(h_DB_noT, QuerySQL);
-		Menu_Def(param1);
-	}
+        if (action == MenuAction_Select)
+        {
+                if(param1 < 1) return;
+                new String:steamid[30];
+                GetClientAuthString(param1, steamid, sizeof(steamid));
+                new String:QuerySQL[100];
+                bool:runQuery = false;
+
+                new String:info[38];
+                GetMenuItem(def_menu, param2, info, sizeof(info));
+
+                if (StrEqual(info, "disview"))
+                {
+                        Format(QuerySQL, sizeof(QuerySQL), "UPDATE `wmodels` SET `viewm` = '0' WHERE `SteamID` = '%s'", steamid);
+                        ViewModelsEnabled[param1] = false;
+                        runQuery = true;
+                }
+                if (StrEqual(info, "enaview"))
+                {
+                        Format(QuerySQL, sizeof(QuerySQL), "UPDATE `wmodels` SET `viewm` = '1' WHERE `SteamID` = '%s'", steamid);
+                        ViewModelsEnabled[param1] = true;
+                        runQuery = true;
+                }
+                if (StrEqual(info, "disworld"))
+                {
+                        Format(QuerySQL, sizeof(QuerySQL), "UPDATE `wmodels` SET `worldm` = '0' WHERE `SteamID` = '%s'", steamid);
+                        WorldModelsEnabled[param1] = false;
+                        runQuery = true;
+                }
+
+                if (StrEqual(info, "enaworld"))
+                {
+                        Format(QuerySQL, sizeof(QuerySQL), "UPDATE `wmodels` SET `worldm` = '1' WHERE `SteamID` = '%s'", steamid);
+                        WorldModelsEnabled[param1] = true;
+                        runQuery = true;
+                }
+                if (StrEqual(info, "flashskin"))
+                {
+                        ShowFlashbangSkinMenu(param1);
+                        return;
+                }
+                if (StrEqual(info, "flashcolor"))
+                {
+                        ShowFlashbangColorMenu(param1);
+                        return;
+                }
+                if (runQuery)
+                {
+                        SQL_TQuery(h_DB, SQL_DoNothing, QuerySQL);
+                }
+                Menu_Def(param1);
+        }
 	if (action == MenuAction_End)
 	{
 		CloseHandle(def_menu);
@@ -1107,7 +1282,7 @@ Specific_weapon_menu(client, String:weapon[], itemnum = 0)
 				Format(WhatIsGoingToBeDisplayed, sizeof(WhatIsGoingToBeDisplayed), "%s \n%s", weapon_info[WeaponInt][x][Name], weapon_info[WeaponInt][x][Description]);
 			}
 		}
-		new String:Position[4]
+		new String:Position[4];
 		IntToString(x, Position, sizeof(Position));
 		if (weapon_info[WeaponInt][x][Flag][0] != EOS)
 		{
@@ -1488,7 +1663,7 @@ public Action:InitGrenade(Handle:timer, any:iGrenade)
 public OnPostThinkPost(client)
 {
 	decl String:cvarvaluel[3];
-	GetConVarString(g_VModelsEnabled, cvarvaluel , sizeof(cvarvaluel))
+	GetConVarString(g_VModelsEnabled, cvarvaluel , sizeof(cvarvaluel));
 	new cvarivalueu = StringToInt(cvarvaluel);
 	if (cvarivalueu == 0)		return;
 	
@@ -1498,14 +1673,14 @@ public OnPostThinkPost(client)
 	{
 		decl chat_flag;
 		decl String:flag[2];
-		GetConVarString(g_AccessFlag, flag, sizeof(flag))
+		GetConVarString(g_AccessFlag, flag, sizeof(flag));
 		chat_flag = ReadFlagString(flag);
 		if(!(GetUserFlagBits(client) & chat_flag))		return;
 	}
 	else if (StrEqual(method, "group", true))
 	{
 		decl String:group[16];
-		GetConVarString(g_AccessGroup, group, sizeof(group))
+		GetConVarString(g_AccessGroup, group, sizeof(group));
 		if(!Client_IsInAdminGroup(client, group, false)) return;
 			
 	}
@@ -1753,14 +1928,20 @@ public OnTakeDamagePost(victim, attacker, inflictor, Float:damage, damagetype)
 
 public Client_Death(client)
 {
-	new EntEffects = GetEntProp(ClientVM[client][1], Prop_Send, "m_fEffects");
-	EntEffects |= EF_NODRAW;
-	SetEntProp(ClientVM[client][1], Prop_Send, "m_fEffects", EntEffects);
-	
-	for (new i=1; i<=MaxClients; i++)
-	{
-		if (IsClientInGame(i))
-		{
+        new EntEffects = GetEntProp(ClientVM[client][1], Prop_Send, "m_fEffects");
+        EntEffects |= EF_NODRAW;
+        SetEntProp(ClientVM[client][1], Prop_Send, "m_fEffects", EntEffects);
+
+        if (g_FlashViewmodelActive[client])
+        {
+                ClearFlashbangViewmodelNow(client);
+                g_FlashViewmodelActive[client] = false;
+        }
+
+        for (new i=1; i<=MaxClients; i++)
+        {
+                if (IsClientInGame(i))
+                {
 			if (!IsPlayerAlive(i) || IsClientObserver(i))
 			{
 				new iTarget = GetEntPropEnt(i, Prop_Send, "m_hObserverTarget");
@@ -1776,7 +1957,7 @@ public Client_Death(client)
 		}
 	}
 	new String:cvarivalued[3];
-	GetConVarString(g_WModelsEnabled, cvarivalued , sizeof(cvarivalued))
+	GetConVarString(g_WModelsEnabled, cvarivalued , sizeof(cvarivalued));
 	//new cvarivalued2 = StringToInt(cvarivalued);
 	//if(cvarivalued2 == 1)	CreateTimer(0.01, ChangeDroppedModel, client);
 }
@@ -1844,14 +2025,14 @@ public Action:Command_Drop(client, const String:command[], argc)
 	{
 		decl chat_flag;
 		decl String:flag[2];
-		GetConVarString(g_AccessFlag, flag, sizeof(flag))
+		GetConVarString(g_AccessFlag, flag, sizeof(flag));
 		chat_flag = ReadFlagString(flag);
 		if(!(GetUserFlagBits(client) & chat_flag))		return Plugin_Continue;
 	}
 	else if (StrEqual(method, "group", true))
 	{
 		decl String:group[16];
-		GetConVarString(g_AccessGroup, group, sizeof(group))
+		GetConVarString(g_AccessGroup, group, sizeof(group));
 		if(!Client_IsInAdminGroup(client, group, false)) return Plugin_Continue;
 			
 	}
@@ -1867,7 +2048,7 @@ public Action:DroppedWeapon(Handle:timer, any:data)
 	new clientd = ReadPackCell(data);
 	CloseHandle(data);
 	decl String:cvarvaluez[3];
-	GetConVarString(g_WModelsEnabled, cvarvaluez , sizeof(cvarvaluez))
+	GetConVarString(g_WModelsEnabled, cvarvaluez , sizeof(cvarvaluez));
 	new cvarivalued = StringToInt(cvarvaluez);
 	if (cvarivalued == 0)		return Plugin_Stop;
 	if (!(clientd <= 0 || clientd > MaxClients))
@@ -1894,7 +2075,7 @@ public Action:OnPlayerRunCmd(client, &iButtons, &Impulse, Float:fVelocity[3], Fl
 	new iActiveWeapon = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
 	if (!IsValidEdict(iActiveWeapon))	return;
 	decl String:cvarvalue[3];
-	GetConVarString(g_EnableDropModels, cvarvalue , sizeof(cvarvalue))
+	GetConVarString(g_EnableDropModels, cvarvalue , sizeof(cvarvalue));
 	new cvarivalue = StringToInt(cvarvalue);
 	if (cvarivalue == 0)		return;
 	decl String:method[10];
@@ -1903,14 +2084,14 @@ public Action:OnPlayerRunCmd(client, &iButtons, &Impulse, Float:fVelocity[3], Fl
 	{
 		decl chat_flag;
 		decl String:flag[2];
-		GetConVarString(g_AccessFlag, flag, sizeof(flag))
+		GetConVarString(g_AccessFlag, flag, sizeof(flag));
 		chat_flag = ReadFlagString(flag);
 		if(!(GetUserFlagBits(client) & chat_flag))		return;
 	}
 	else if (StrEqual(method, "group", true))
 	{
 		decl String:group[16];
-		GetConVarString(g_AccessGroup, group, sizeof(group))
+		GetConVarString(g_AccessGroup, group, sizeof(group));
 		if(!Client_IsInAdminGroup(client, group, false)) return;
 			
 	}
@@ -1935,7 +2116,7 @@ public WeaponSwitchPost(client, iActiveWeapon)
 
 	if (!IsValidEdict(iActiveWeapon))	return;
 	decl String:cvarvalue[3];
-	GetConVarString(g_EnableDropModels, cvarvalue , sizeof(cvarvalue))
+	GetConVarString(g_EnableDropModels, cvarvalue , sizeof(cvarvalue));
 	new cvarivalue = StringToInt(cvarvalue);
 	if (cvarivalue == 0)		return;
 	decl String:method[10];
@@ -1944,32 +2125,33 @@ public WeaponSwitchPost(client, iActiveWeapon)
 	{
 		decl chat_flag;
 		decl String:flag[2];
-		GetConVarString(g_AccessFlag, flag, sizeof(flag))
+		GetConVarString(g_AccessFlag, flag, sizeof(flag));
 		chat_flag = ReadFlagString(flag);
 		if(!(GetUserFlagBits(client) & chat_flag))		return;
 	}
 	else if (StrEqual(method, "group", true))
 	{
 		decl String:group[16];
-		GetConVarString(g_AccessGroup, group, sizeof(group))
+		GetConVarString(g_AccessGroup, group, sizeof(group));
 		if(!Client_IsInAdminGroup(client, group, false)) return;
 			
 	}
 	decl String:sWeapon[64];
 	GetEdictClassname(iActiveWeapon, sWeapon, sizeof(sWeapon));
 	new intweaponz = WeaponNameToNum(sWeapon);
-	new wepindex_d = client_wepskin_index[client][intweaponz];
-	if ((weapon_info[intweaponz][wepindex_d][WModel][0] != EOS) && iActiveWeapon != -1 && WorldModelsEnabled[client] && (weapon_info[intweaponz][wepindex_d][Flag][0] == EOS || GetUserFlagBits(client) & ReadFlagString(weapon_info[intweaponz][wepindex_d][Flag])))
-	{
-		//PrintToChat(client, "swaped weapon u did");
-		SetEntProp(iActiveWeapon, Prop_Send, "m_iWorldModelIndex", weapon_info[intweaponz][wepindex_d][PWModel]);
-	}
+        new wepindex_d = client_wepskin_index[client][intweaponz];
+        if ((weapon_info[intweaponz][wepindex_d][WModel][0] != EOS) && iActiveWeapon != -1 && WorldModelsEnabled[client] && (weapon_info[intweaponz][wepindex_d][Flag][0] == EOS || GetUserFlagBits(client) & ReadFlagString(weapon_info[intweaponz][wepindex_d][Flag])))
+        {
+                //PrintToChat(client, "swaped weapon u did");
+                SetEntProp(iActiveWeapon, Prop_Send, "m_iWorldModelIndex", weapon_info[intweaponz][wepindex_d][PWModel]);
+        }
+        HandleFlashbangViewmodelSwitch(client, StrEqual(sWeapon, "weapon_flashbang", false));
 }
 
 Tellm(client)
 {
 		new String:steamid[32];
-		GetClientAuthString(client, steamid, sizeof(steamid))
+                GetClientAuthString(client, steamid, sizeof(steamid));
 		new String:GoGoFetch[100];
 		Format(GoGoFetch, sizeof(GoGoFetch), "SELECT viewm,worldm FROM `wmodels` WHERE SteamID = '%s'", steamid);
 		SQL_TQuery(h_DB, LoadDefinitions, GoGoFetch, client);
@@ -2023,7 +2205,7 @@ public Event_C4Planted(Handle:event, const String:name[], bool:dontBroadcast)
 public Action:C4Planted(Handle:timer, any:client)
 {
 	decl String:cvarvaluez[3];
-	GetConVarString(g_WModelsEnabled, cvarvaluez , sizeof(cvarvaluez))
+	GetConVarString(g_WModelsEnabled, cvarvaluez , sizeof(cvarvaluez));
 	new cvarivalued = StringToInt(cvarvaluez);
 	if (cvarivalued == 0)		return;
 	if (client > 0 && client <= MaxClients)
@@ -2317,4 +2499,255 @@ stock WeaponsGetClientWeapons(client, weapons[WeaponsSlot])
 	{
 		weapons[x] = GetPlayerWeaponSlot(client, x);
 	}
+}
+
+ShowFlashbangSkinMenu(client)
+{
+        if (client < 1 || client > MaxClients)
+        {
+                return;
+        }
+        new Handle:menu = CreateMenu(FlashbangSkinMenuHandler);
+        SetMenuTitle(menu, "Выберите стиль флешки");
+        new String:buffer[64];
+        decl String:item[8];
+        for (new i = 0; i < sizeof(g_FlashSkinDisplay); i++)
+        {
+                Format(buffer, sizeof(buffer), "%s", g_FlashSkinDisplay[i]);
+                IntToString(i, item, sizeof(item));
+                AddMenuItem(menu, item, buffer);
+        }
+        SetMenuExitBackButton(menu, true);
+        DisplayMenu(menu, client, MENU_TIME_FOREVER);
+}
+
+ShowFlashbangColorMenu(client)
+{
+        if (client < 1 || client > MaxClients)
+        {
+                return;
+        }
+        new Handle:menu = CreateMenu(FlashbangColorMenuHandler);
+        SetMenuTitle(menu, "Выберите цвет флешки");
+        new String:buffer[64];
+        decl String:item[8];
+        for (new i = 0; i < sizeof(g_FlashColorDisplay); i++)
+        {
+                Format(buffer, sizeof(buffer), "%s", g_FlashColorDisplay[i]);
+                IntToString(i, item, sizeof(item));
+                AddMenuItem(menu, item, buffer);
+        }
+        SetMenuExitBackButton(menu, true);
+        DisplayMenu(menu, client, MENU_TIME_FOREVER);
+}
+
+public FlashbangSkinMenuHandler(Handle:menu, MenuAction:action, param1, param2)
+{
+        if (action == MenuAction_Select)
+        {
+                new String:info[8];
+                GetMenuItem(menu, param2, info, sizeof(info));
+                new index = StringToInt(info);
+                if (index >= 0 && index < sizeof(g_FlashSkinDisplay))
+                {
+                        g_FlashSkinPreference[param1] = FlashSkinOption:index;
+                        PrintToChat(param1, "[WeaponModels] Скин флешки: %s", g_FlashSkinDisplay[index]);
+                        if (IsClientHoldingFlashbang(param1))
+                        {
+                                ScheduleFlashbangViewmodelUpdate(param1, true);
+                        }
+                }
+                Menu_Def(param1);
+        }
+        else if (action == MenuAction_End)
+        {
+                CloseHandle(menu);
+        }
+        else if (action == MenuAction_Cancel)
+        {
+                Menu_Def(param1);
+        }
+}
+
+public FlashbangColorMenuHandler(Handle:menu, MenuAction:action, param1, param2)
+{
+        if (action == MenuAction_Select)
+        {
+                new String:info[8];
+                GetMenuItem(menu, param2, info, sizeof(info));
+                new index = StringToInt(info);
+                if (index >= 0 && index < sizeof(g_FlashColorDisplay))
+                {
+                        g_FlashColorPreference[param1] = FlashColorOption:index;
+                        PrintToChat(param1, "[WeaponModels] Цвет флешки: %s", g_FlashColorDisplay[index]);
+                        if (IsClientHoldingFlashbang(param1))
+                        {
+                                ScheduleFlashbangViewmodelUpdate(param1, true);
+                        }
+                }
+                Menu_Def(param1);
+        }
+        else if (action == MenuAction_End)
+        {
+                CloseHandle(menu);
+        }
+        else if (action == MenuAction_Cancel)
+        {
+                Menu_Def(param1);
+        }
+}
+
+stock bool:IsClientHoldingFlashbang(client)
+{
+        if (client < 1 || client > MaxClients || !IsClientInGame(client))
+        {
+                return false;
+        }
+        new weapon = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
+        if (!IsValidEdict(weapon))
+        {
+                return false;
+        }
+        decl String:classname[32];
+        GetEdictClassname(weapon, classname, sizeof(classname));
+        return StrEqual(classname, "weapon_flashbang", false);
+}
+
+stock void HandleFlashbangViewmodelSwitch(client, bool:holdingFlashbang)
+{
+        if (client < 1 || client > MaxClients || !IsClientInGame(client))
+        {
+                return;
+        }
+        if (holdingFlashbang)
+        {
+                ScheduleFlashbangViewmodelUpdate(client, true);
+        }
+        else if (g_FlashViewmodelActive[client])
+        {
+                ScheduleFlashbangViewmodelUpdate(client, false);
+        }
+}
+
+stock void ScheduleFlashbangViewmodelUpdate(client, bool:apply)
+{
+        if (client < 1 || client > MaxClients || !IsClientInGame(client))
+        {
+                return;
+        }
+        new serial = GetClientSerial(client);
+        if (apply)
+        {
+                g_FlashApplyRetries[client] = 3;
+                CreateTimer(0.0, Timer_ApplyFlashbangViewmodel, serial);
+        }
+        else
+        {
+                CreateTimer(0.0, Timer_ClearFlashbangViewmodel, serial);
+        }
+}
+
+public Action:Timer_ApplyFlashbangViewmodel(Handle:timer, any:serial)
+{
+        new client = GetClientFromSerial(serial);
+        if (!client || !IsClientInGame(client))
+        {
+                return Plugin_Stop;
+        }
+        if (!IsClientHoldingFlashbang(client))
+        {
+                return Plugin_Stop;
+        }
+        if (ApplyFlashbangViewmodelNow(client))
+        {
+                g_FlashViewmodelActive[client] = true;
+                g_FlashApplyRetries[client] = 0;
+                return Plugin_Stop;
+        }
+        if (g_FlashApplyRetries[client] > 0)
+        {
+                g_FlashApplyRetries[client]--;
+                CreateTimer(0.05, Timer_ApplyFlashbangViewmodel, GetClientSerial(client));
+        }
+        return Plugin_Stop;
+}
+
+public Action:Timer_ClearFlashbangViewmodel(Handle:timer, any:serial)
+{
+        new client = GetClientFromSerial(serial);
+        if (!client || !IsClientInGame(client))
+        {
+                return Plugin_Stop;
+        }
+        if (g_FlashViewmodelActive[client])
+        {
+                ClearFlashbangViewmodelNow(client);
+                g_FlashViewmodelActive[client] = false;
+        }
+        g_FlashApplyRetries[client] = 0;
+        return Plugin_Stop;
+}
+
+stock bool:ApplyFlashbangViewmodelNow(client)
+{
+        bool:applied = false;
+        for (new i = 0; i < 2; i++)
+        {
+                new viewmodel = ClientVM[client][i];
+                if (!IsValidEntity(viewmodel))
+                {
+                        continue;
+                }
+                if (!Flashbang_IsFlashViewModel(viewmodel))
+                {
+                        continue;
+                }
+                Flashbang_ApplyMaterial(viewmodel, g_FlashSkinPreference[client], g_FlashColorPreference[client]);
+                applied = true;
+        }
+        return applied;
+}
+
+stock void ClearFlashbangViewmodelNow(client)
+{
+        for (new i = 0; i < 2; i++)
+        {
+                new viewmodel = ClientVM[client][i];
+                if (!IsValidEntity(viewmodel))
+                {
+                        continue;
+                }
+                Flashbang_ClearMaterial(viewmodel);
+        }
+}
+
+stock bool:Flashbang_IsFlashViewModel(entity)
+{
+        if (!IsValidEntity(entity))
+        {
+                return false;
+        }
+        decl String:modelName[PLATFORM_MAX_PATH];
+        GetEntPropString(entity, Prop_Data, "m_ModelName", modelName, sizeof(modelName));
+        if (modelName[0] == EOS)
+        {
+                return false;
+        }
+        return (StrContains(modelName, "flashbang", false) != -1);
+}
+
+stock void Flashbang_ApplyMaterial(entity, FlashSkinOption:skin, FlashColorOption:color)
+{
+        SetVariantString(g_FlashSkinMaterialPaths[skin]);
+        AcceptEntityInput(entity, "SetMaterial");
+        SetEntityRenderMode(entity, RenderMode:0);
+        SetEntityRenderColor(entity, g_FlashColorValues[color][0], g_FlashColorValues[color][1], g_FlashColorValues[color][2], 255);
+}
+
+stock void Flashbang_ClearMaterial(entity)
+{
+        SetVariantString("");
+        AcceptEntityInput(entity, "SetMaterial");
+        SetEntityRenderMode(entity, RenderMode:0);
+        SetEntityRenderColor(entity, 255, 255, 255, 255);
 }
