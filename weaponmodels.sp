@@ -22,7 +22,39 @@ stock void CPrintToChatEx(int client, int author, const char[] format, any ...)
     PrintToChat(client, "%s", buffer);
 }
 #endif
-#include <smlib>
+#tryinclude <smlib>
+#if !defined _smlib_included
+stock bool Client_IsInAdminGroup(int client, const char[] group, bool defaultAllow = false)
+{
+    if (group[0] == EOS)
+    {
+        return defaultAllow;
+    }
+
+    if (!IsClientInGame(client))
+    {
+        return defaultAllow;
+    }
+
+    AdminId admin = GetUserAdmin(client);
+    if (admin == INVALID_ADMIN_ID)
+    {
+        return defaultAllow;
+    }
+
+    char groupName[64];
+    int index;
+    for (index = 0; GetAdminGroup(admin, index, groupName, sizeof(groupName)); index++)
+    {
+        if (StrEqual(groupName, group, false))
+        {
+            return true;
+        }
+    }
+
+    return defaultAllow;
+}
+#endif
 #include <smartdm>
 #undef REQUIRE_PLUGIN
 #include <zombiereloaded>
